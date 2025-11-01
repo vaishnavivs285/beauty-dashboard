@@ -66,26 +66,31 @@ beauty_project/
    git clone https://github.com/yourusername/beauty-brand-dashboard.git
    cd beauty-brand-dashboard
 
-2. Install Dependencies
+Step 2: Install Dependencies
   pip install -r requirements.txt
 
- 3. Run the application
+ Step 3: Run the Application
     streamlit run beauty_dashboard_app.py
 
-  4.  Access the Dashboard
-       The app will open automatically in your browser at:
+    Step 4: Access the Dashboard
+ The app will open automatically in your browser at:
        http://localhost:8501
   
   
-  ##Optional: AI Insights Configuration
-              To enable AI-generated insights, create a file at:
-               .streamlit/secrets.toml
-     Add your API key:
-     OPENAI_API_KEY = "your_openai_api_key_here"
-      If you don’t have an API key, you can disable that section in the code (the dashboard will still work normally).
+  ##6. Optional: AI Insights Configuration
 
-  ###7. Future Enhancements
-        Integration with real Google Trends data
-        Brand sentiment analysis via social media data
-        Product review mining and clustering
-        Recommendation engine for personalized beauty suggestions
+To enable AI-generated insights, create a file at:
+               .streamlit/secrets.toml
+     Then add your API key:
+     OPENAI_API_KEY = "your_openai_api_key_here"
+     If you don’t have an API key, you can disable that section in the code — the dashboard will still function normally.
+
+  ### 7. Future Enhancements
+
+       Integration with real Google Trends data
+
+       Brand sentiment analysis via social media data
+
+       Product review mining and clustering
+
+       Recommendation engine for personalized beauty suggestions
