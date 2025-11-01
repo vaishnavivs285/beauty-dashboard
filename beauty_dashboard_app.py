@@ -23,7 +23,7 @@ try:
 except Exception:
     FIREBASE_AVAILABLE = False
     
-# Try optional openai import (to make it available if needed in the chatbot)
+# Try optional openai import
 OPENAI_AVAILABLE = False
 try:
     import openai
@@ -132,19 +132,33 @@ firebase_ready = False
 
 if FIREBASE_AVAILABLE:
     
-    # 1. Try to load from Streamlit Secrets (for deployment)
-    if "firebase_key" in st.secrets:
+    # 1. Try to load from Streamlit Secrets (for deployment) using individual keys
+    if "FIREBASE_PROJECT_ID" in st.secrets:
         try:
-            # Extract the JSON string and convert it to a dictionary
-            key_dict = json.loads(st.secrets["firebase_key"]["json_content"])
+            # Reconstruct the Firebase JSON dictionary from individual Streamlit secrets
+            key_dict = {
+                "type": st.secrets["FIREBASE_TYPE"],
+                "project_id": st.secrets["FIREBASE_PROJECT_ID"],
+                "private_key_id": st.secrets["FIREBASE_PRIVATE_KEY_ID"],
+                # Reading the full private key string
+                "private_key": st.secrets["FIREBASE_PRIVATE_KEY"], 
+                "client_email": st.secrets["FIREBASE_CLIENT_EMAIL"],
+                "client_id": st.secrets["FIREBASE_CLIENT_ID"],
+                "auth_uri": st.secrets["FIREBASE_AUTH_URI"],
+                "token_uri": st.secrets["FIREBASE_TOKEN_URI"],
+                "auth_provider_x509_cert_url": st.secrets["FIREBASE_AUTH_PROVIDER_X509_CERT_URL"],
+                "client_x509_cert_url": st.secrets["FIREBASE_CLIENT_X509_CERT_URL"],
+                "universe_domain": st.secrets["FIREBASE_UNIVERSE_DOMAIN"]
+            }
+            
             cred = credentials.Certificate(key_dict)
             if not firebase_admin._apps:
                 firebase_admin.initialize_app(cred)
             db = firestore.client()
             firebase_ready = True
-            st.sidebar.success("Firestore (Live Saving) **Enabled** via Streamlit Secrets.")
+            st.sidebar.success("Firestore (Live Saving) **Enabled** via Streamlit Secrets (Robust).")
         except Exception as e:
-            st.sidebar.error(f"Firestore Init Failed (Secret): {e}")
+            st.sidebar.error(f"Firestore Init Failed (Secret Rebuild): {e}")
             firebase_ready = False
             
     # 2. Fallback to local file (for local testing only)
@@ -166,11 +180,10 @@ else:
     st.sidebar.info("Install 'firebase-admin' for live saving (optional).")
 
 
-# OpenAI Key Setup (for future chatbot integration)
+# OpenAI Key Setup 
 OPENAI_KEY = None
 if OPENAI_AVAILABLE and "OPENAI_API_KEY" in st.secrets:
     OPENAI_KEY = st.secrets["OPENAI_API_KEY"]
-    # You would typically initialize your OpenAI client here if using a dedicated library
     st.sidebar.success("OpenAI Key Found.")
 elif OPENAI_AVAILABLE:
     st.sidebar.warning("OpenAI key not found in secrets. Chatbot is rule-based only.")
@@ -279,8 +292,7 @@ with tab_products:
                         data = []
                         
                     data.append(rec)
-                    # NOTE: Streamlit Cloud restarts frequently, so local JSON won't persist across sessions.
-                    # This fallback works great locally, but not for multi-user deployment!
+                    # NOTE: Local file will not persist across Cloud sessions!
                     with open(local_file, "w", encoding="utf-8") as f:
                         json.dump(data, f, ensure_ascii=False, indent=2)
                     st.success(f"Saved locally: {p['name']} (Note: Local file may not persist on Cloud deployment)")
@@ -413,8 +425,9 @@ with tab_chat:
         qq = query.lower()
         
         # --- Start of AI Integration Placeholder ---
-        # If you were to use OpenAI, this is where you'd insert the call:
-        # if OPENAI_KEY and (call is warranted):
+        # You can add logic here to use the OPENAI_KEY if you want a smarter bot:
+        # if OPENAI_KEY and (query suggests using AI):
+        #    import openai
         #    client = openai.OpenAI(api_key=OPENAI_KEY)
         #    ai_resp = client.chat.completions.create(...)
         #    return ai_resp.choices[0].message.content
