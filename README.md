@@ -67,22 +67,31 @@ beauty_project/
    cd beauty-brand-dashboard
 
 Step 2: Install Dependencies
-  pip install -r requirements.txt
+
+        pip install -r requirements.txt
+
 
  Step 3: Run the Application
+ 
     streamlit run beauty_dashboard_app.py
 
-    Step 4: Access the Dashboard
+      
  The app will open automatically in your browser at:
+ 
        http://localhost:8501
   
   
   ##6. Optional: AI Insights Configuration
 
+  
+
 To enable AI-generated insights, create a file at:
+
                .streamlit/secrets.toml
+               
      Then add your API key:
      OPENAI_API_KEY = "your_openai_api_key_here"
+     
      If you don’t have an API key, you can disable that section in the code — the dashboard will still function normally.
 
   ### 7. Future Enhancements
