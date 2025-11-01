@@ -22,6 +22,15 @@ try:
     FIREBASE_AVAILABLE = True
 except Exception:
     FIREBASE_AVAILABLE = False
+    
+# Try optional openai import (to make it available if needed in the chatbot)
+OPENAI_AVAILABLE = False
+try:
+    import openai
+    OPENAI_AVAILABLE = True
+except Exception:
+    OPENAI_AVAILABLE = False
+
 
 # ---------------- Page config ----------------
 st.set_page_config(
@@ -60,12 +69,9 @@ st.markdown(
 
 # ---------------- Sample / real data setup ----------------
 brands = ["The Ordinary", "Clinique", "Laneige", "Drunk Elephant", "Briogeo"]
-# simulated average interest numbers
 avg_interest = [57.8, 43.7, 26.1, 10.2, 4.8]
-# simulated forecast placeholders (you used Prophet earlier)
 forecast_values = [1369.9, 1475.1, 1399.9, 1386.5, 1417.1]
 
-# Mock product database keyed by brand -> skin types
 products = {
     "The Ordinary": {
         "Oily": {"name": "Niacinamide 10% + Zinc 1%", "price": 650, "desc": "Balances sebum and clears acne.", "img": ""},
@@ -100,18 +106,14 @@ brand_data = {
     "Briogeo": {"price": "Mid-range", "best_for": "Dry"},
 }
 
-# Helper function to extract price (moved to global scope)
 def extract_price(p_val):
     """Safely extracts the integer price from a product dictionary value."""
-    # Assuming p_val is an integer as per the 'products' mock data
-    # If the mock data had strings (like "₹650"), we'd need string manipulation
     return int(p_val)
 
 # ---------------- Sidebar (filters + nav fallback) ----------------
 st.sidebar.header("Filters & Settings")
 selected_brands = st.sidebar.multiselect("Select brands:", options=brands, default=brands)
 skin_type = st.sidebar.selectbox("Skin type:", ["Oily", "Dry", "Combination", "Sensitive", "Normal"])
-# Price range slider (numeric)
 price_min, price_max = st.sidebar.slider(
     "💰 Price range (₹):",
     min_value=0,
@@ -122,30 +124,57 @@ price_min, price_max = st.sidebar.slider(
 
 mood = st.sidebar.radio("Chatbot mood:", ["Sweet 💖", "Savage 😈", "Professional 💼"], index=2)
 
-# Firebase init (optional) - searches for firebase-key.json in project folder
+
+# --- CRITICAL CHANGE: SECRETS AND FIREBASE INITIALIZATION ---
+
 db = None
 firebase_ready = False
+
 if FIREBASE_AVAILABLE:
-    possible_paths = [
-        os.path.join(os.getcwd(), "firebase-key.json"),
-        os.path.join(os.getcwd(), ".streamlit", "firebase-key.json"),
-        os.path.join(os.path.expanduser("~"), "firebase-key.json"),
-    ]
-    key_path = next((p for p in possible_paths if os.path.exists(p)), None)
-    if key_path:
+    
+    # 1. Try to load from Streamlit Secrets (for deployment)
+    if "firebase_key" in st.secrets:
         try:
-            cred = credentials.Certificate(key_path)
+            # Extract the JSON string and convert it to a dictionary
+            key_dict = json.loads(st.secrets["firebase_key"]["json_content"])
+            cred = credentials.Certificate(key_dict)
             if not firebase_admin._apps:
                 firebase_admin.initialize_app(cred)
             db = firestore.client()
             firebase_ready = True
+            st.sidebar.success("Firestore (Live Saving) **Enabled** via Streamlit Secrets.")
         except Exception as e:
-            st.sidebar.error(f"Firestore init failed: {e}")
+            st.sidebar.error(f"Firestore Init Failed (Secret): {e}")
             firebase_ready = False
+            
+    # 2. Fallback to local file (for local testing only)
+    elif os.path.exists("firebase-key.json"):
+        try:
+            cred = credentials.Certificate("firebase-key.json")
+            if not firebase_admin._apps:
+                firebase_admin.initialize_app(cred)
+            db = firestore.client()
+            firebase_ready = True
+            st.sidebar.info("Firestore (Live Saving) **Enabled** via local file.")
+        except Exception as e:
+            st.sidebar.error(f"Firestore Init Failed (Local File): {e}")
+            firebase_ready = False
+            
     else:
-        st.sidebar.info("Optional: place your Firebase service account JSON as 'firebase-key.json' in the project folder to enable live saving.")
+        st.sidebar.info("Firestore key not found. Live saving disabled (using local JSON fallback).")
 else:
-    st.sidebar.info("Install 'firebase-admin' to enable Firestore live saving (optional).")
+    st.sidebar.info("Install 'firebase-admin' for live saving (optional).")
+
+
+# OpenAI Key Setup (for future chatbot integration)
+OPENAI_KEY = None
+if OPENAI_AVAILABLE and "OPENAI_API_KEY" in st.secrets:
+    OPENAI_KEY = st.secrets["OPENAI_API_KEY"]
+    # You would typically initialize your OpenAI client here if using a dedicated library
+    st.sidebar.success("OpenAI Key Found.")
+elif OPENAI_AVAILABLE:
+    st.sidebar.warning("OpenAI key not found in secrets. Chatbot is rule-based only.")
+
 
 # ---------------- Top tabs for navigation ----------------
 tab_products, tab_analytics, tab_chat = st.tabs(["💄 Products", "📊 Live Analytics", "💬 Chatbot"])
@@ -155,7 +184,6 @@ with tab_products:
     st.markdown("<h1 style='color:#f4f6f9; font-weight:800;'>Beauty Brand Insights</h1>", unsafe_allow_html=True)
     st.markdown("Explore data-driven product matches, quick insights, and save items for analysis.")
 
-    # Row: Charts + Matches
     c1, c2 = st.columns([1.2, 1])
 
     with c1:
@@ -163,7 +191,6 @@ with tab_products:
         fig_interest = go.Figure()
         for i, b in enumerate(selected_brands):
             if b in brands:
-                 # Check if the brand is in the main list to get its index
                 fig_interest.add_trace(go.Bar(x=[b], y=[avg_interest[brands.index(b)]], name=b,
                                               marker=dict(color=["#ff7fa6","#ffb3c1","#ffd0e0","#ffc1b6","#fcd7e0"][i%5])))
         fig_interest.update_layout(template="plotly_dark", height=380, showlegend=False,
@@ -172,19 +199,16 @@ with tab_products:
 
     with c2:
         st.subheader("Best Matches for your filters")
-
-        # Logic to find brands matching the selected skin type and price range
         matches = []
         for b in selected_brands:
             for sk, p in products.get(b, {}).items():
-                # NOTE: p["price"] is an integer in the mock data, but we use the helper just in case the data changes
                 price_val = extract_price(p["price"]) 
                 if sk == skin_type and price_min <= price_val <= price_max:
                     matches.append(b)
-                    break # Only need one match per brand
+                    break 
 
         if matches:
-            st.success(f"💅 Best matches for **{skin_type}** skin in ₹{price_min}–₹{price_max} range: **{', '.join(sorted(list(set(matches))))}**") # Use set to ensure unique names
+            st.success(f"💅 Best matches for **{skin_type}** skin in ₹{price_min}–₹{price_max} range: **{', '.join(sorted(list(set(matches))))}**")
         else:
             st.info("No exact match — try adjusting filters. (The Ordinary is a versatile option.)")
 
@@ -197,12 +221,10 @@ with tab_products:
             any_shown = True
             p = products[brand][skin_type]
             
-            # Check price filter again before display (though matches are shown above)
             price_val = extract_price(p['price'])
             if not (price_min <= price_val <= price_max):
-                continue # Skip display if product is outside selected price range
+                continue
 
-            # Product card layout
             st.markdown(
                 f"""<div class="product-card">
                         <div class="product-title">{p['name']}</div>
@@ -212,10 +234,9 @@ with tab_products:
                 unsafe_allow_html=True
             )
             
-            save_key = f"save_{brand}_{p['name'].replace(' ', '_')}" # Use product name for better key uniqueness
+            save_key = f"save_{brand}_{p['name'].replace(' ', '_')}"
             if st.button(f"💗 Save {p['name']}", key=save_key):
                 
-                # Determine the current price range description for chatbot/analytics display
                 if price_val < 1000:
                     price_range_desc = "Budget"
                 elif price_val < 4000:
@@ -223,19 +244,17 @@ with tab_products:
                 else:
                     price_range_desc = "Luxury"
 
-                # save record to firestore or local json fallback
                 rec = {
                     "brand": brand,
                     "product_name": p['name'],
                     "skin_type": skin_type,
-                    "price_range": price_range_desc, # Use the derived description
+                    "price_range": price_range_desc,
                     "price_value": p['price'],
                     "timestamp": datetime.utcnow().isoformat()
                 }
                 
                 if firebase_ready and db:
                     try:
-                        # Use firestore.SERVER_TIMESTAMP for accurate time in Firestore
                         db.collection("product_clicks").document().set({
                             "brand": rec["brand"],
                             "product_name": rec["product_name"],
@@ -260,20 +279,20 @@ with tab_products:
                         data = []
                         
                     data.append(rec)
+                    # NOTE: Streamlit Cloud restarts frequently, so local JSON won't persist across sessions.
+                    # This fallback works great locally, but not for multi-user deployment!
                     with open(local_file, "w", encoding="utf-8") as f:
                         json.dump(data, f, ensure_ascii=False, indent=2)
-                    st.success(f"Saved locally: {p['name']}")
+                    st.success(f"Saved locally: {p['name']} (Note: Local file may not persist on Cloud deployment)")
 
     if not any_shown:
         st.info("No product found for these filters. Try different skin type / brands / price range.")
 
-    # Insights summary below products
     st.markdown("---")
     st.subheader("Insights Summary")
     sel_interest = [avg_interest[brands.index(b)] for b in selected_brands if b in brands] if selected_brands else []
     
     if sel_interest:
-        # Find the max and min interest scores and their corresponding brands
         max_interest = max(sel_interest)
         min_interest = min(sel_interest)
         top_b_index = [brands.index(b) for b in selected_brands if b in brands and avg_interest[brands.index(b)] == max_interest][0]
@@ -292,24 +311,19 @@ with tab_products:
 with tab_analytics:
     st.header("Live Analytics — Saved Interactions")
 
-    # Read saved interactions
     records = []
     if firebase_ready and db:
         try:
-            # Note: The original code had a potential issue reading the server timestamp 
-            # I'll keep the existing logic but recommend converting Firestore timestamps 
-            # to a readable format *after* fetching documents in a real application.
             docs = db.collection("product_clicks").order_by("timestamp", direction=firestore.Query.DESCENDING).limit(1000).stream()
             for d in docs:
                 r = d.to_dict()
-                # Attempt to normalize Firestore timestamp object if present
                 ts = r.get("timestamp")
-                if ts and hasattr(ts, 'isoformat'): # Check if it's a datetime-like object
+                if ts and hasattr(ts, 'isoformat'):
                      r["timestamp"] = ts.isoformat()
-                elif ts and hasattr(ts, 'strftime'): # Handles datetime objects
+                elif ts and hasattr(ts, 'strftime'):
                      r["timestamp"] = ts.strftime("%Y-%m-%dT%H:%M:%S")
-                # Otherwise, keep what's there (should be a string from local fallback or a Firestore ServerTimestamp)
                 records.append(r)
+            st.success(f"Loaded {len(records)} records from Firestore.")
         except Exception as e:
             st.error(f"Error reading Firestore: {e}")
             records = []
@@ -319,23 +333,20 @@ with tab_analytics:
             try:
                 with open(local_file, "r", encoding="utf-8") as f:
                     records = json.load(f)
+                st.info(f"Loaded {len(records)} records from local JSON fallback.")
             except Exception as e:
                 st.error(f"Failed to read local log: {e}")
                 records = []
         else:
+            st.info("No saved interactions yet. Use the Products tab to save items (saved locally if Firestore not configured).")
             records = []
 
-    if not records:
-        st.info("No saved interactions yet. Use the Products tab to save items (saved locally if Firestore not configured).")
-    else:
+    if records:
         df_rec = pd.DataFrame(records)
         
-        # Ensure timestamp column is datetime for sorting/display
         if "timestamp" in df_rec.columns:
-            # Coerce errors to NaT if timestamp conversion fails (like for raw Firestore ServerTimestamp objects)
             df_rec["timestamp"] = pd.to_datetime(df_rec["timestamp"], errors='coerce')
         
-        # Aggregations
         prod_counts = df_rec["product_name"].value_counts().reset_index()
         prod_counts.columns = ["product_name", "count"]
 
@@ -345,7 +356,6 @@ with tab_analytics:
         skin_counts = df_rec["skin_type"].value_counts().reset_index()
         skin_counts.columns = ["skin_type", "count"]
 
-        # Layout analytics charts
         a1, a2 = st.columns(2)
         with a1:
             st.subheader("Most Saved Products")
@@ -370,17 +380,15 @@ with tab_analytics:
         st.plotly_chart(fig_s, use_container_width=True)
         st.write(skin_counts)
 
-        # Download CSV export
         csv = df_rec.to_csv(index=False).encode("utf-8")
         st.download_button(label="📥 Download saved interactions (CSV)", data=csv, file_name="saved_interactions.csv", mime="text/csv")
 
         st.markdown("---")
         st.subheader("Recent Saved Interactions")
-        # Ensure 'timestamp' is present before sorting
         if "timestamp" in df_rec.columns:
             st.dataframe(df_rec.sort_values(by="timestamp", ascending=False).head(100), use_container_width=True)
         else:
-            st.dataframe(df_rec.head(100), use_container_width=True) # Fallback to unsorted
+            st.dataframe(df_rec.head(100), use_container_width=True)
 
 # --------------------- CHATBOT TAB ---------------------
 with tab_chat:
@@ -391,7 +399,6 @@ with tab_chat:
 
     def chatbot_answer(query, mood, skin):
         
-        # Determine current price range from slider for the chatbot's generic recommendation logic
         current_price_range = ""
         if price_max < 1500:
             current_price_range = "Budget"
@@ -404,15 +411,22 @@ with tab_chat:
             return "Ask me something about product recommendations, trends, or pricing."
             
         qq = query.lower()
+        
+        # --- Start of AI Integration Placeholder ---
+        # If you were to use OpenAI, this is where you'd insert the call:
+        # if OPENAI_KEY and (call is warranted):
+        #    client = openai.OpenAI(api_key=OPENAI_KEY)
+        #    ai_resp = client.chat.completions.create(...)
+        #    return ai_resp.choices[0].message.content
+        # --- End of AI Integration Placeholder ---
+        
         if "trend" in qq or "popular" in qq:
             resp = f"The Ordinary and Clinique show consistently high interest in our dataset. The Ordinary is strong among budget buyers."
         elif "forecast" in qq:
             resp = "Forecast models predict steady interest into early 2026 for ingredient-driven brands (simulated)."
         elif "recommend" in qq or "best" in qq:
-            # Recommend based on the sidebar's current skin type and a price range derived from the slider
             candidates = [b for b in brands if brand_data[b]["best_for"] == skin and brand_data[b]["price"] == current_price_range]
             
-            # If no direct match by best_for and price, try just best_for
             if not candidates:
                  candidates = [b for b in brands if brand_data[b]["best_for"] == skin]
 
@@ -430,9 +444,6 @@ with tab_chat:
         return "💼 " + resp
 
     if q:
-        # Pass skin_type (skin) to the chatbot logic
         st.info(chatbot_answer(q, mood, skin_type)) 
     else:
         st.caption("Type a question and press Enter to get an answer.")
-
-# ---------------- End of file ----------------
