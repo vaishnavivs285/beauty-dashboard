@@ -51,12 +51,11 @@ It helps identify top-performing brands, forecast market trends, and uncover ins
 
 ## 4. Project Structure
 beauty_project/
-│
 ├── beauty_dashboard_app.py # Main Streamlit app
 ├── data/ # Optional data folder (CSV files)
 ├── .streamlit/
 │ └── secrets.toml # API key (if using AI insights)
-└── README.md # Project documentation
+
 
 ---
 
